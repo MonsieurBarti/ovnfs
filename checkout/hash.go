@@ -280,19 +280,23 @@ func (t *tree) removeUnder(p string) {
 }
 
 // finish turns created directories left without leaves into empty-directory
-// leaves and drops empty-directory leaves that gained children.
+// leaves and drops empty-directory leaves that gained children. A created
+// directory is a child too, so nested empty directories keep only the deepest.
 func (t *tree) finish() map[string]store.File {
 	parents := make(map[string]bool)
-	for p, f := range t.files {
-		if f.Mode == store.ModeDir {
-			continue
-		}
+	markParents := func(p string) {
 		for d := path.Dir(p); d != "."; d = path.Dir(d) {
 			if parents[d] {
 				break
 			}
 			parents[d] = true
 		}
+	}
+	for p := range t.files {
+		markParents(p)
+	}
+	for d := range t.dirs {
+		markParents(d)
 	}
 	for d := range t.dirs {
 		if !parents[d] {
