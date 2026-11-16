@@ -64,6 +64,12 @@ even when busy. Retiring handles may interrupt operations on files that
 remain open across the restart; replacing a mount may additionally lose
 unflushed client writes.
 
+On macOS the daemon checks its NFS mount record every 10 s and mounts the
+server again after a forced unmount, such as "Disconnect All" in the "Server
+connections interrupted" dialog; `status` shows `mount lost` until then. The
+mount stays hard, with no `soft` or `deadtimeout`, so a slow daemon raises that
+dialog instead of an unmount that loses unflushed writes.
+
 Inspection, unmount and mount commands each have a 5 s deadline. Cancellation
 kills the command's process group without waiting indefinitely for a stuck
 kernel call to finish. Inspection failures leave the mount untouched; a failed

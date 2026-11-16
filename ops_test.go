@@ -69,6 +69,29 @@ func TestOpsStatusAndEmptyLs(t *testing.T) {
 	}
 }
 
+// TestOpsStatusReportsMountLost checks that status reports the mount check.
+func TestOpsStatusReportsMountLost(t *testing.T) {
+	root := t.TempDir()
+	reg, err := checkout.Open(checkout.Config{State: filepath.Join(root, "state"), Mount: filepath.Join(root, "mount"), Memory: overlay.NewMemory(64<<20, 1<<20, 0), BlobCache: 64 << 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reg.Close()
+	for _, lost := range []bool{true, false} {
+		h := &opsHandler{reg: reg, started: time.Now()}
+		if lost {
+			h.mountLost = func() bool { return true }
+		}
+		status, err := h.Call(context.Background(), "status", json.RawMessage(`{}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := status.(api.Status).MountLost; got != lost {
+			t.Errorf("MountLost %v, want %v", got, lost)
+		}
+	}
+}
+
 // TestEventFanout checks that independent subscribers see the same persisted event.
 func TestEventFanout(t *testing.T) {
 	hub := &eventHub{}

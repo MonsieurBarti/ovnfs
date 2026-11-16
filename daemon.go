@@ -280,6 +280,9 @@ func (cmd *startCmd) Run(c *cli) error {
 		fmt.Fprintf(stderr, "%s ovnfs (pid %d, log %s)\n", paint(stderr, styleGreen, "started"), st.PID, paint(stderr, styleDim, logPath(c.state)))
 	} else {
 		fmt.Fprintf(stderr, "%s (pid %d)\n", paint(stderr, styleDim, "already running"), st.PID)
+		if st.MountLost {
+			fmt.Fprintf(stderr, "mount lost at %s, the daemon mounts it again within %s\n", st.Mount, mountCheckEvery)
+		}
 	}
 	return nil
 }
@@ -474,6 +477,9 @@ func statusRows(st api.Status, clientVersion string) [][2]string {
 	}...)
 	if st.Footprint != 0 {
 		rows = append(rows, [2]string{"footprint", humanBytes(st.Footprint)})
+	}
+	if st.MountLost {
+		rows = append(rows, [2]string{"mount lost", "the system mount is gone, the daemon mounts it again within " + mountCheckEvery.String()})
 	}
 	return rows
 }

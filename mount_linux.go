@@ -15,6 +15,9 @@ func mounted(dir string) bool {
 	return found || err != nil
 }
 
+// checkMount reports the mount present: the remount watch is macOS NFS only.
+func checkMount(_, _, _ string, _ int) mountState { return mountPresent }
+
 // mountAtime reports whether the mount at dir updates access times; ok is
 // false when dir is not a mount point or the records cannot be read.
 func mountAtime(dir string) (atime, ok bool) {

@@ -148,3 +148,15 @@ func TestStatusRowsShowMemoryError(t *testing.T) {
 		t.Fatal("memory error row shown with no parked file")
 	}
 }
+
+func TestStatusRowsMountLost(t *testing.T) {
+	for _, lost := range []bool{true, false} {
+		found := false
+		for _, row := range statusRows(api.Status{Mount: "/m", MountLost: lost}, "") {
+			found = found || row[0] == "mount lost"
+		}
+		if found != lost {
+			t.Errorf("MountLost %v: mount lost row present %v", lost, found)
+		}
+	}
+}

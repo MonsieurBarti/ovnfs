@@ -79,6 +79,8 @@ type Status struct {
 	Footprint    int64   `json:"footprint"`               // process memory as the OS charges it (macOS phys_footprint, Linux RssAnon+VmSwap, Windows private bytes); 0 where unknown
 	// Warnings name host settings that slow the mount down, each with its fix.
 	Warnings []string `json:"warnings,omitempty"`
+	// MountLost reports that the system mount is gone; the daemon mounts it again.
+	MountLost bool `json:"mount_lost,omitempty"`
 }
 
 // Usage is resident bytes against a limit. A zero Limit disables the cache.

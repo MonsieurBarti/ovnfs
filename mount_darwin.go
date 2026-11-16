@@ -11,6 +11,37 @@ func mounted(dir string) bool {
 	return found || err != nil
 }
 
+// checkMount reads the mount records for the daemon's NFS mount at mount,
+// without I/O to it: a stat of a hung mount blocks. Port 0 is the state
+// directory's NFS socket. It errs toward present, as mounted does, and reports
+// other frontends present.
+func checkMount(proto, mount, state string, port int) mountState {
+	if proto != "nfs" {
+		return mountPresent
+	}
+	rec, found, err := mountRecord(mount)
+	if err != nil {
+		return mountPresent
+	}
+	source := "127.0.0.1:/"
+	if port == 0 {
+		source = "<" + nfsSocket(state) + ">:/"
+	}
+	return mountStateOf(rec, found, source)
+}
+
+// mountStateOf classifies the mount record found for the mount point against
+// the NFS source mountCmd mounts.
+func mountStateOf(rec unix.Statfs_t, found bool, source string) mountState {
+	if !found {
+		return mountMissing
+	}
+	if unix.ByteSliceToString(rec.Fstypename[:]) != "nfs" || unix.ByteSliceToString(rec.Mntfromname[:]) != source {
+		return mountForeign
+	}
+	return mountPresent
+}
+
 // mountAtime reports whether the mount at dir updates access times; ok is
 // false when dir is not a mount point or the records cannot be read.
 func mountAtime(dir string) (atime, ok bool) {

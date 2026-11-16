@@ -19,12 +19,13 @@ const protocolVersion = 5
 
 // opsHandler binds admin operations to one checkout registry.
 type opsHandler struct {
-	reg     *checkout.Registry
-	shares  *shares
-	links   *links
-	welcome admin.Welcome
-	started time.Time
-	stop    func(context.Context, api.StopArgs) error // unmounts as asked, then has the server exit
+	reg       *checkout.Registry
+	shares    *shares
+	links     *links
+	welcome   admin.Welcome
+	started   time.Time
+	stop      func(context.Context, api.StopArgs) error // unmounts as asked, then has the server exit
+	mountLost func() bool                               // reports the system mount gone; nil where the daemon does not watch it
 }
 
 // decodeArgs rejects malformed or unknown request fields.
@@ -65,6 +66,9 @@ func (h *opsHandler) Call(ctx context.Context, op string, raw json.RawMessage) (
 			s := api.Status{Version: protocolVersion, BuildVersion: processBuild.Version, PID: os.Getpid(), Uptime: time.Since(h.started).Seconds(), Proto: h.welcome.Proto, Port: h.welcome.Port, Mount: h.welcome.Mount, State: h.welcome.State, Socket: socketPath(h.welcome.State)}
 			h.reg.Counts(&s)
 			reportHeap(&s)
+			if h.mountLost != nil {
+				s.MountLost = h.mountLost()
+			}
 			if w := vnodeWarning(h.reg.Largest()); w != "" {
 				s.Warnings = append(s.Warnings, w)
 			}

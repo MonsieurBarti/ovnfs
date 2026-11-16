@@ -161,6 +161,9 @@ func mounted(dir string) bool {
 	return err == nil && strings.EqualFold(remote, smbRemote)
 }
 
+// checkMount reports the mount present: the remount watch is macOS NFS only.
+func checkMount(_, _, _ string, _ int) mountState { return mountPresent }
+
 // makeMountPoint checks that mapDrive or WinFsp can take dir: it fails when dir
 // is not a drive root, the drive is mapped to a share (connected or only
 // remembered), or a volume holds the letter.

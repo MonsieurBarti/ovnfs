@@ -292,6 +292,17 @@ func (cmd *serveCmd) Run(c *cli) (err error) {
 	defer checkoutShares.CloseAll()
 	port := 0
 	release := func(force bool) error { return unmount(mount, force) }
+	// stopping keeps the mount watch from mounting what serve unmounts. Set
+	// under the listener's call fence, it waits out a remount in progress.
+	var stopping atomic.Bool
+	setStopping := func(v bool) {
+		if l := files.Load(); l != nil {
+			l.calls.Lock()
+			defer l.calls.Unlock()
+		}
+		stopping.Store(v)
+	}
+	var mountLost func() bool
 	if proto == "fuse" || proto == "winfsp" {
 		srv, mountErr := mountInProcess(proto, e, mount, cmd.Atime)
 		if mountErr != nil {
@@ -310,6 +321,27 @@ func (cmd *serveCmd) Run(c *cli) (err error) {
 		}
 		files.Store(l)
 		defer l.Close() // removes the NFS socket, once: a keep-mount cut already has
+		if proto == "nfs" && runtime.GOOS == "darwin" {
+			mountLost = func() bool { return checkMount(proto, mount, state, port) != mountPresent }
+			check := func() mountState {
+				if stopping.Load() {
+					return mountPresent // serve is unmounting it
+				}
+				return checkMount(proto, mount, state, port)
+			}
+			remount := func() error {
+				err := errStopping
+				l.serving(func() {
+					if !stopping.Load() {
+						err = attach(proto, l.Addr(), mount, "", "", settings)
+					}
+				})
+				return err
+			}
+			watchCtx, stopWatch := context.WithCancel(context.Background())
+			defer stopWatch()
+			go watchMount(watchCtx, mount, mountCheckEvery, check, remount, log.Printf)
+		}
 	}
 	log.Printf("mounted at %s", mount)
 	// Shutdown closes the socket first: stop waits for it to close, then for
@@ -324,7 +356,7 @@ func (cmd *serveCmd) Run(c *cli) (err error) {
 	go lk.listen(linkListener)
 	stops := make(chan stopRequest)
 	welcome := admin.Welcome{Version: protocolVersion, Ops: api.Ops, Features: api.Features, Proto: proto, Port: port, Mount: mount, State: state}
-	handler := &opsHandler{reg: reg, shares: checkoutShares, links: lk, welcome: welcome, started: time.Now(), stop: func(ctx context.Context, a api.StopArgs) error {
+	handler := &opsHandler{reg: reg, shares: checkoutShares, links: lk, welcome: welcome, started: time.Now(), mountLost: mountLost, stop: func(ctx context.Context, a api.StopArgs) error {
 		done := make(chan error, 1)
 		select {
 		case stops <- stopRequest{keepMount: a.KeepMount, ctx: ctx, done: done}:
@@ -342,6 +374,7 @@ func (cmd *serveCmd) Run(c *cli) (err error) {
 		var req stopRequest
 		select {
 		case err = <-served:
+			setStopping(true)
 			_ = release(true)
 			return err
 		case req = <-stops:
@@ -364,6 +397,7 @@ func (cmd *serveCmd) Run(c *cli) (err error) {
 				continue
 			}
 		}
+		setStopping(true)
 		if l := files.Load(); req.keepMount && l != nil {
 			// Cut before the export closes, which would answer the kernel
 			// client "not found": it retries the cut connections instead, until
@@ -384,6 +418,7 @@ func (cmd *serveCmd) Run(c *cli) (err error) {
 			}
 			log.Print(err)
 			force = true
+			setStopping(false)
 		}
 		if req.done != nil {
 			req.done <- err
@@ -394,6 +429,9 @@ func (cmd *serveCmd) Run(c *cli) (err error) {
 		}
 	}
 }
+
+// errStopping is the remount answer once serve has begun to unmount.
+var errStopping = errors.New("the daemon is stopping")
 
 // stopRequest is a stop op awaiting serve's answer on done: nil once the
 // daemon exits, the unmount error while it keeps running.
