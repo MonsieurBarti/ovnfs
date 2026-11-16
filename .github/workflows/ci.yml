@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        n: [1, 2, 3]
+        n: [1, 2, 3, 4, 5, 6]
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -71,5 +71,18 @@ jobs:
               if not t and a in ("pass", "fail", "skip"): done.add(p)
           for p in sorted(start - done): print(p, "last test:", last.get(p))
           EOF
-          grep -E 'SIGQUIT|goroutine [0-9]+ \[' go-test.json | head -c 20000 || true
+          python3 - <<'EOF'
+          import json
+          out = []
+          for line in open("go-test.json"):
+              try: e = json.loads(line)
+              except ValueError: continue
+              if e.get("Package", "").endswith("/fuse") and e.get("Test") == "TestForcedUnmountEndsBusyMount" and "Output" in e:
+                  out.append(e["Output"])
+          s = "".join(out)
+          i = s.find("SIGQUIT")
+          if i >= 0:
+              print("== DUMP")
+              print(s[i:i + 60000])
+          EOF
           exit $rc
