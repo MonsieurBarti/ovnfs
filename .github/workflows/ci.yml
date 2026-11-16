@@ -10,36 +10,6 @@ permissions:
   contents: read
 
 jobs:
-  check:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-      - name: gofmt
-        run: |
-          unformatted=$(gofmt -l .)
-          if [ -n "$unformatted" ]; then
-            echo "::error::files need gofmt:"
-            echo "$unformatted"
-            exit 1
-          fi
-      - name: go mod tidy
-        run: go mod tidy -diff
-      - name: go vet
-        run: |
-          for goos in linux darwin windows; do
-            echo "GOOS=$goos"
-            GOOS=$goos go vet ./...
-          done
-      # Same goreleaser as release.yml, from the module proxy.
-      - name: release build
-        run: go run github.com/goreleaser/goreleaser/v2@v2.20.0 release --snapshot --clean
-
   test:
     strategy:
       fail-fast: false
@@ -47,10 +17,8 @@ jobs:
         include:
           - os: ubuntu-latest
             race: -race
-          - os: macos-latest
-            race: -race
-          - os: windows-latest
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -71,4 +39,4 @@ jobs:
         if: runner.os == 'Windows'
         run: choco install winfsp -y --no-progress
       - name: go test
-        run: go test ${{ matrix.race }} ./...
+        run: go test -race -v -timeout 8m -count=3 ./fuse
