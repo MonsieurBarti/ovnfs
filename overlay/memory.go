@@ -3,8 +3,10 @@ package overlay
 import (
 	"container/list"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -633,20 +635,23 @@ func (f *FS) openMem(m *memFile, name string, flag int) (billy.File, error) {
 	return h, nil
 }
 
-// Flush spills every memory file into the upper, after which the upper
+// Flush spills every memory file it can into the upper, after which the upper
 // directory alone holds this overlay's changes. Snapshots, diffs and shutdown
-// call it before reading the upper from disk.
+// call it before reading the upper from disk. A file whose spill fails stays
+// in memory and does not stop the others; the result joins one error per
+// failed file, in path order.
 func (f *FS) Flush() error {
 	f.staging.Lock()
 	defer f.staging.Unlock()
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	for _, m := range f.files {
-		if err := f.spill(m); err != nil {
-			return err
+	var errs []error
+	for _, p := range slices.Sorted(maps.Keys(f.files)) {
+		if err := f.spill(f.files[p]); err != nil {
+			errs = append(errs, fmt.Errorf("flush %s: %w", p, err))
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // Discard drops every memory file without writing it and returns its budget,
