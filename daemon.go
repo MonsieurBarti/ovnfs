@@ -44,6 +44,9 @@ func nfsSocket(state string) string { return filepath.Join(state, "nfs.sock") }
 // logPath is where a background daemon's output is appended.
 func logPath(state string) string { return filepath.Join(state, "serve.log") }
 
+// crashPath is where the runtime writes a fatal error trace, besides stderr.
+func crashPath(state string) string { return filepath.Join(state, "crash.log") }
+
 // accepting reports whether something listens on the admin socket, without a protocol handshake.
 func accepting(state string) bool {
 	conn, err := net.DialTimeout("unix", socketPath(state), time.Second)

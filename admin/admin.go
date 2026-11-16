@@ -12,6 +12,8 @@ import (
 	"net"
 	"slices"
 	"sync"
+	"syscall"
+	"time"
 	"unicode/utf8"
 )
 
@@ -126,6 +128,8 @@ type Server struct {
 	w      Welcome
 	h      Handler
 	events func(context.Context) <-chan Event
+	// Logf, when set, reports each temporary accept error that Serve retries.
+	Logf func(format string, args ...any)
 }
 
 // NewServer returns a server that holds every hello until Ready.
@@ -140,16 +144,39 @@ func (s *Server) Ready(w Welcome, h Handler, events func(context.Context) <-chan
 }
 
 // Serve accepts clients on l until it is closed. A connection still waiting
-// for Ready then closes, so its client fails instead of waiting on.
+// for Ready then closes, so its client fails instead of waiting on. A
+// temporary accept error, such as running out of descriptors, is retried
+// after a backoff; any other error ends Serve.
 func (s *Server) Serve(l net.Listener) error {
 	defer close(s.closed)
+	var delay time.Duration
 	for {
 		conn, err := l.Accept()
 		if err != nil {
-			return err
+			if !temporaryAcceptError(err) {
+				return err
+			}
+			delay = min(max(2*delay, 5*time.Millisecond), time.Second)
+			if s.Logf != nil {
+				s.Logf("accept: %v, retrying in %v", err, delay)
+			}
+			time.Sleep(delay)
+			continue
 		}
+		delay = 0
 		go s.serveConn(conn)
 	}
+}
+
+// temporaryAcceptError reports whether err is a resource shortage or an
+// aborted client that a later Accept can get past.
+func temporaryAcceptError(err error) bool {
+	for _, errno := range []syscall.Errno{syscall.EMFILE, syscall.ENFILE, syscall.ENOBUFS, syscall.ENOMEM, syscall.ECONNABORTED} {
+		if errors.Is(err, errno) {
+			return true
+		}
+	}
+	return false
 }
 
 // serveConn owns a connection and cancels its requests on disconnect.

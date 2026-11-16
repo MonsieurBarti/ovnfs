@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -175,6 +176,18 @@ func (h *eventHub) events(ctx context.Context) <-chan admin.Event {
 	return ch
 }
 
+// recordCrashes makes the runtime also write a fatal error trace to the
+// crash file of state, so a crash leaves a trace when stderr reaches nothing.
+func recordCrashes(state string) error {
+	f, err := os.OpenFile(crashPath(state), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0600)
+	if err != nil {
+		return err
+	}
+	// SetCrashOutput keeps its own duplicate of the descriptor.
+	defer f.Close()
+	return debug.SetCrashOutput(f, debug.CrashOptions{})
+}
+
 // Run opens the persistent export, attaches its native client, and handles shutdown.
 func (cmd *serveCmd) Run(c *cli) (err error) {
 	proto := cmd.Proto
@@ -205,6 +218,9 @@ func (cmd *serveCmd) Run(c *cli) (err error) {
 	if err = os.MkdirAll(state, 0700); err != nil {
 		return fmt.Errorf("state directory: %w", err)
 	}
+	if err := recordCrashes(state); err != nil {
+		log.Printf("crash file: %v", err)
+	}
 	// Claim the admin socket before the state loads, which takes minutes on
 	// a large state after a reboot: a client then finds this daemon and
 	// waits for its hello, instead of starting a second one.
@@ -214,6 +230,7 @@ func (cmd *serveCmd) Run(c *cli) (err error) {
 	}
 	defer adminListener.Close()
 	adminServer := admin.NewServer()
+	adminServer.Logf = log.Printf
 	served := make(chan error, 2)
 	go func() {
 		served <- fmt.Errorf("admin serve: %w", adminServer.Serve(adminListener))
@@ -344,7 +361,8 @@ func (cmd *serveCmd) Run(c *cli) (err error) {
 			_ = release(true)
 			return err
 		case req = <-stops:
-		case <-sigs:
+		case sig := <-sigs:
+			log.Printf("received %v, stopping", sig)
 		}
 		var flushRelease func()
 		if !force || req.keepMount {
