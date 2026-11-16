@@ -14,11 +14,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-            race: -race
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+        n: [1, 2, 3]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -34,9 +32,44 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y fuse3
           echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
-      # WinFsp tests mount real drives when WinFsp is installed, else skip.
-      - name: Set up WinFsp
-        if: runner.os == 'Windows'
-        run: choco install winfsp -y --no-progress
-      - name: go test
-        run: go test -race -v -timeout 8m -count=3 ./fuse
+      - name: go test with hang watchdog
+        run: |
+          go test -race -json ./... > go-test.json 2>&1 &
+          pid=$!
+          for i in $(seq 1 600); do kill -0 $pid 2>/dev/null || break; sleep 1; done
+          if kill -0 $pid 2>/dev/null; then
+            echo "HANG after 10 min"
+            ps -eo pid,ppid,stat,wchan:32,etime,args | grep -E '\.test|go test' | grep -v grep || true
+            mountpoint -q /sys/fs/fuse/connections || sudo mount -t fusectl none /sys/fs/fuse/connections
+            for c in /sys/fs/fuse/connections/*; do echo "conn $c waiting=$(cat $c/waiting)"; done
+            grep fuse /proc/mounts || true
+            for p in $(pgrep -f '\.test'); do
+              echo "== pid $p $(tr '\0' ' ' < /proc/$p/cmdline)"
+              for t in /proc/$p/task/*; do
+                st=$(sudo cat $t/stack 2>/dev/null | head -6 | tr '\n' '|')
+                case "$st" in *fuse*|*request_wait*) echo "task ${t##*/} $(cat $t/stat | cut -d' ' -f3) $st";; esac
+              done
+            done
+            pkill -QUIT -f '\.test'; sleep 5
+            for c in /sys/fs/fuse/connections/*; do echo 1 | sudo tee $c/abort > /dev/null; done
+            sleep 20
+          fi
+          rc=0; wait $pid || rc=$?
+          echo "go test exit $rc"
+          grep -E '"Action":"(fail|skip)"' go-test.json | grep -v '"Test"' || true
+          echo "== packages still running at the end:"
+          python3 - <<'EOF'
+          import json
+          start, done, last = set(), set(), {}
+          for line in open("go-test.json"):
+              try: e = json.loads(line)
+              except ValueError: continue
+              p, a, t = e.get("Package"), e.get("Action"), e.get("Test")
+              if not p: continue
+              if t and a == "run": last[p] = t
+              if not t and a == "start": start.add(p)
+              if not t and a in ("pass", "fail", "skip"): done.add(p)
+          for p in sorted(start - done): print(p, "last test:", last.get(p))
+          EOF
+          grep -E 'SIGQUIT|goroutine [0-9]+ \[' go-test.json | head -c 20000 || true
+          exit $rc
