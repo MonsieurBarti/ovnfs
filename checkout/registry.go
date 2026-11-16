@@ -577,6 +577,7 @@ func (r *Registry) Ls(ctx context.Context, args api.LsArgs) (api.LsReply, error)
 func (r *Registry) Counts(s *api.Status) {
 	if r.config.Memory != nil {
 		s.Memory.Used, s.Memory.Limit = r.config.Memory.Usage()
+		s.MemoryParked, s.MemoryError = r.config.Memory.Parked()
 	}
 	s.BlobCache.Used, s.BlobCache.Limit = r.store.CacheUsage()
 	r.mu.RLock()

@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -47,6 +48,7 @@ type FS struct {
 	hosts       map[*file]struct{}  // open descriptors of upper files, see [FS.CloseFiles]
 	writers     map[inodeKey]int    // open writable descriptors per upper inode, see [FS.upperInfo]
 	staging     sync.RWMutex        // shared by an unlocked writeback, see [FS.writeBack]
+	spillLogged atomic.Bool         // the first failed spill is logged, see [Memory.park]
 }
 
 // Filesystem interface assertions keep the overlay compatible with protocols.

@@ -415,6 +415,14 @@ func (cmd *statusCmd) Run(c *cli) error {
 	if err != nil || c.json {
 		return err
 	}
+	for _, row := range statusRows(st) {
+		fmt.Fprintf(stdout, "%s%s%s\n", paint(stdout, styleDim, row[0]), strings.Repeat(" ", max(2, 12-len(row[0]))), row[1])
+	}
+	return nil
+}
+
+// statusRows lays out a status reply as label and value rows.
+func statusRows(st api.Status) [][2]string {
 	transport := st.Proto + ":" + fmt.Sprint(st.Port) // protocol and file-server port, not a dialable address
 	if st.Proto == "nfs" && st.Port == 0 {
 		transport = st.Proto + ":" + nfsSocket(st.State)
@@ -431,19 +439,21 @@ func (cmd *statusCmd) Run(c *cli) error {
 		{"bases", commas(int64(st.Bases))},
 		{"layers", commas(int64(st.Layers))},
 		{"memory", usage(st.Memory, "off: writes go to disk")},
+	}
+	if st.MemoryParked != 0 {
+		rows = append(rows, [2]string{"memory error", fmt.Sprintf("%d parked: %s", st.MemoryParked, st.MemoryError)})
+	}
+	rows = append(rows, [][2]string{
 		{"node cache", usage(st.NodeCache, "current directory")},
 		{"node index", humanBytes(st.NodeIndexBytes)},
 		{"blob cache", usage(st.BlobCache, "off")},
 		{"go heap", humanBytes(st.HeapLive) + " live, " + humanBytes(st.HeapInUse) + " in use, " + humanBytes(st.GoHeld) + " held"},
-	}
+	}...)
 	if st.Footprint != 0 {
 		rows = append(rows, [2]string{"footprint", humanBytes(st.Footprint)})
 	}
 	if st.NodeCacheError != "" {
 		rows = append(rows, [2]string{"node cache error", st.NodeCacheError})
 	}
-	for _, row := range rows {
-		fmt.Fprintf(stdout, "%s%s%s\n", paint(stdout, styleDim, row[0]), strings.Repeat(" ", max(2, 12-len(row[0]))), row[1])
-	}
-	return nil
+	return rows
 }

@@ -62,7 +62,9 @@ type Status struct {
 	Snapshots      int     `json:"snapshots"`
 	Bases          int     `json:"bases"`
 	Layers         int     `json:"layers"`
-	Memory         Usage   `json:"memory"` // checkouts' written files held in memory before they spill to disk
+	Memory         Usage   `json:"memory"`                  // checkouts' written files held in memory before they spill to disk
+	MemoryParked   int     `json:"memory_parked,omitempty"` // memory files whose write to disk failed, retried every second
+	MemoryError    string  `json:"memory_error,omitempty"`  // the latest such failure while MemoryParked is not 0
 	NodeIndexBytes int64   `json:"node_index_bytes"`
 	NodeCacheError string  `json:"node_cache_error,omitempty"`
 	NodeCache      Usage   `json:"node_cache"`  // estimated reconstructible node and listing bytes

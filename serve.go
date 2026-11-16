@@ -193,6 +193,7 @@ func (cmd *serveCmd) Run(c *cli) (err error) {
 	if cmd.Memory > 0 {
 		mem = overlay.NewMemory(int64(cmd.Memory), memoryFileMax, memoryIdle)
 		mem.SyncOnFsync = cmd.Fsync
+		mem.Logf = log.Printf
 	}
 	state, err := filepath.Abs(c.state)
 	if err != nil {
