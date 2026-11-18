@@ -41,6 +41,15 @@ sets NFS read/write transfers, default `128K`: powers of two from `4K` to `1M`
 are accepted; `0` uses the default. It applies to Unix-socket and TCP NFS mounts,
 not SMB. A restart replaces a macOS NFS mount whose negotiated options differ.
 
+`serve --nfs-soft` (`OVNFS_NFS_SOFT=1`, user key `nfs_soft`) mounts NFS soft.
+By default the mount is hard: while the daemon is stopped, paused or too busy
+to answer, every process that touches a checkout blocks until it answers
+again, shutdown included. A soft mount fails such a call with `ETIMEDOUT`
+instead, on macOS after 12 to 18 s (`timeo=10,retrans=3`), and recovers once
+the daemon answers. The cost: a write that times out is lost, so a tool can
+see a failed write where a hard mount would have waited. It applies to NFS
+mounts, not SMB; a restart replaces a macOS NFS mount mounted the other way.
+
 `ovnfs tune` measures isolated mount configurations and asks before applying a
 balanced result. Add `--project DIR` for a real Cargo workspace; see
 [the tuning methodology](development.md#balanced-configuration-tuning).
@@ -204,6 +213,7 @@ env:
 | `blob_cache` | size | user file only: memory budget for content-addressed blobs (default 16M) |
 | `atime` | boolean | user file only: allow access time updates |
 | `nfs_io_size` | size | user file only: NFS transfer size, power of two from 4K to 1M (default 128K; 0 uses default) |
+| `nfs_soft` | boolean | user file only: fail NFS calls with `ETIMEDOUT` when the daemon stops answering, instead of blocking (default false) |
 | `git_remotes` | boolean | user file only: give a repository a git remote `ovnfs/NAME` per checkout (default true) |
 
 `rules` is a block scalar (`rules: |`) with one `<class> <predicate>` per line.
@@ -258,7 +268,7 @@ ovnfs config edit --global
 
 The keys are `rules`, `cache.ROOT.rebuild`, `cache.ROOT.key`, `env.image`,
 `env.setup` and the daemon settings `state`, `mount`, `proto`, `memory`,
-`fsync`, `blob_cache`, `atime`, `nfs_io_size` and `git_remotes`. A cache root may hold dots
+`fsync`, `blob_cache`, `atime`, `nfs_io_size`, `nfs_soft` and `git_remotes`. A cache root may hold dots
 (`cache.web/.next.key`) and matches its entry however it is spelled
 (`cache.web/dist.rebuild` finds `./web/dist`). `rules`, `env.setup` and
 `cache.ROOT.key` take several values, one rule line or item each, and

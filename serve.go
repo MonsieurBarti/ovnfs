@@ -112,6 +112,7 @@ func serveDefaults(conf manifest.Daemon) kong.Option {
 		"blob_cache_default":  cmp.Or(os.Getenv("OVNFS_BLOB_CACHE"), conf.BlobCache, defaultBlobCache.String()),
 		"atime_default":       cmp.Or(os.Getenv("OVNFS_ATIME"), conf.Atime, "false"),
 		"nfs_io_size_default": cmp.Or(os.Getenv("OVNFS_NFS_IO_SIZE"), conf.NFSIOSize, byteSize(defaultNFSIOSize).String()),
+		"nfs_soft_default":    cmp.Or(os.Getenv("OVNFS_NFS_SOFT"), conf.NFSSoft, "false"),
 		"git_remotes_default": cmp.Or(os.Getenv("OVNFS_GIT_REMOTES"), conf.GitRemotes, "true"),
 	}
 }
@@ -125,6 +126,7 @@ type serveCmd struct {
 	BlobCache  byteSize `help:"Memory budget for small content-addressed blobs; 0 disables." default:"${blob_cache_default}"`
 	Atime      bool     `help:"Allow access time updates on the mount." default:"${atime_default}"`
 	NFSIOSize  byteSize `name:"nfs-io-size" help:"NFS read/write transfer size (power of two, 4K to 1M)." default:"${nfs_io_size_default}"`
+	NFSSoft    bool     `name:"nfs-soft" help:"Fail NFS calls with ETIMEDOUT when the daemon stops answering, instead of blocking; a timed-out write is lost." default:"${nfs_soft_default}"`
 	GitRemotes bool     `help:"Give each source repository a git remote ovnfs/NAME per checkout of it." default:"${git_remotes_default}" negatable:""`
 }
 
@@ -181,7 +183,7 @@ func (cmd *serveCmd) Run(c *cli) (err error) {
 	if cmd.NFSIOSize > 1<<20 {
 		return fmt.Errorf("NFS I/O size must not exceed 1 MiB")
 	}
-	settings := mountSettings{Atime: cmd.Atime, NFSIOSize: int(cmd.NFSIOSize)}
+	settings := mountSettings{Atime: cmd.Atime, NFSIOSize: int(cmd.NFSIOSize), NFSSoft: cmd.NFSSoft}
 	if err := settings.validate(); err != nil {
 		return err
 	}

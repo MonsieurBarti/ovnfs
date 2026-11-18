@@ -8,6 +8,19 @@ const defaultNFSIOSize = 128 << 10
 type mountSettings struct {
 	Atime     bool
 	NFSIOSize int
+	NFSSoft   bool
+}
+
+// nfsRecovery is the NFS option for a daemon that stops answering. A hard
+// mount (the default) waits for it however long it takes, so every process
+// that touches a checkout blocks. A soft one fails the call with ETIMEDOUT
+// instead: on macOS after 12 to 18 s (timeo 1 s, three retries with backoff).
+// A write that times out is lost, so soft is opt-in.
+func (s mountSettings) nfsRecovery() string {
+	if s.NFSSoft {
+		return "soft,timeo=10,retrans=3"
+	}
+	return "hard"
 }
 
 func (s mountSettings) nfsIOSize() int {
