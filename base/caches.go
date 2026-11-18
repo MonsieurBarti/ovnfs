@@ -8,6 +8,7 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -40,6 +41,10 @@ const (
 	treeDir   = "tree"
 	rootsFile = "roots.json"
 )
+
+// takeSlots bounds the snapshots that clone directory roots at once, across
+// every base of the daemon.
+var takeSlots = make(chan struct{}, 2)
 
 // Caches is one copy-on-write snapshot of a local base's cache and local
 // roots, which the checkouts the registry opens on it read instead of the
@@ -191,7 +196,19 @@ func (c *Caches) take(b *Base) {
 		close(c.listed)
 	})
 	defer listed()
-	if err := errors.Join(os.RemoveAll(c.dir), os.MkdirAll(c.tree, 0o700), c.files.open()); err != nil {
+	// A leftover of an earlier take (a daemon stopped mid-clone) moves aside
+	// at once: removing a cloned node_modules takes minutes, and listings of
+	// the checkout wait for listed. A stop before its removal leaves it to
+	// the registry, which removes snapshots no checkout names.
+	old := c.dir + ".old" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	var cleared error
+	if err := os.Rename(c.dir, old); err != nil {
+		old = ""
+		if !errors.Is(err, os.ErrNotExist) {
+			cleared = os.RemoveAll(c.dir)
+		}
+	}
+	if err := errors.Join(cleared, os.MkdirAll(c.tree, 0o700), c.files.open()); err != nil {
 		b.fault(fmt.Sprintf("cache snapshot %s: %v; cache and local roots are empty", c.id, err))
 		return
 	}
@@ -209,7 +226,24 @@ func (c *Caches) take(b *Base) {
 		}
 	}
 	listed()
+	// Directory roots clone one snapshot at a time per slot: a start that
+	// retakes every checkout's snapshot at once thrashes the volume for
+	// minutes, and a stop waits for each clone in progress.
+	select {
+	case takeSlots <- struct{}{}:
+		defer func() { <-takeSlots }()
+	case <-b.closing:
+		return
+	}
+	if old != "" {
+		os.RemoveAll(old)
+	}
 	for _, p := range dirs {
+		select {
+		case <-b.closing:
+			return // without rootsFile: the next start takes it again
+		default:
+		}
 		c.copyRoot(b, p, roots[p])
 	}
 	data, err := json.Marshal(roots)

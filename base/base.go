@@ -92,9 +92,12 @@ type Base struct {
 	cacheRoots []string
 	mu         sync.Mutex
 	caches     map[string]*Caches // mu: the cache snapshots served, by id
-	closeOnce  sync.Once
-	closeErr   error
-	remote     *remoteState
+	// closing is closed when Close begins: takes waiting for a slot, or
+	// between two roots, end without completing their snapshot.
+	closing   chan struct{}
+	closeOnce sync.Once
+	closeErr  error
+	remote    *remoteState
 	// lfsLocks serialize producing LFS objects, striped by object id, so
 	// concurrent first opens of one object run one git lfs smudge.
 	lfsLocks [16]sync.Mutex
@@ -256,7 +259,7 @@ func available(c Config, m Meta, repos []source.Repo) []source.Repo {
 // newBase serves an open capture index.
 func newBase(c Config, m Meta, x *captureIndex, stats api.Capture, domains *source.Domains) *Base {
 	m.ForkTime = m.ForkTime.UTC()
-	b := &Base{config: c, meta: m, index: x, stats: stats, domains: domains, objects: make(map[string]*git.Objects), cacheRoots: cacheRootsOf(x), caches: make(map[string]*Caches)}
+	b := &Base{config: c, meta: m, index: x, stats: stats, domains: domains, objects: make(map[string]*git.Objects), cacheRoots: cacheRootsOf(x), caches: make(map[string]*Caches), closing: make(chan struct{})}
 	if m.Remote != nil {
 		b.remote = &remoteState{b: b, prefetched: map[string]bool{}}
 	}
@@ -382,6 +385,7 @@ func (b *Base) Bottom(c *Caches) overlay.Bottom {
 // was, never unmapped memory.
 func (b *Base) Close() error {
 	b.closeOnce.Do(func() {
+		close(b.closing)
 		var errs []error
 		b.objectsMu.Lock()
 		for _, objects := range b.objects {

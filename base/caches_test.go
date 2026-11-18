@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/stencil-hq/ovnfs/internal/clone"
 	"github.com/stencil-hq/ovnfs/internal/ident"
@@ -173,6 +174,42 @@ func TestCacheSnapshotWithoutSharedBlocks(t *testing.T) {
 	}
 	if got := read(t, view, ".env"); got != "SECRET=1" {
 		t.Errorf("local root = %q, want a copy", got)
+	}
+}
+
+// TestCacheSnapshotTakesQueueAndStop lists a snapshot's roots while every
+// take slot is busy, and closes its base without waiting for the queued
+// clone, which a later start takes again.
+func TestCacheSnapshotTakesQueueAndStop(t *testing.T) {
+	repo, dir := repository(t)
+	writeTestFile(t, filepath.Join(dir, "node_modules", "pkg", "index.js"), "v1")
+	b, config := createTestBase(t, repo, nil)
+	for range cap(takeSlots) {
+		takeSlots <- struct{}{}
+	}
+	t.Cleanup(func() {
+		for range cap(takeSlots) {
+			<-takeSlots
+		}
+	})
+	c := b.TakeCaches("c1")
+	select {
+	case <-c.listed:
+	case <-time.After(10 * time.Second):
+		t.Fatal("roots were not listed while every take slot was busy")
+	}
+	closed := make(chan error, 1)
+	go func() { closed <- b.Close() }()
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Close waited for a take queued behind busy slots")
+	}
+	if _, err := os.Stat(filepath.Join(config.StateDir, cachesDir, "c1", rootsFile)); !os.IsNotExist(err) {
+		t.Errorf("a take stopped before its clone completed its snapshot: %v", err)
 	}
 }
 
